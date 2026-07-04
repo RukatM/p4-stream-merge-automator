@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import logging
 from P4 import P4, P4Exception
 
 def parse_arguments():
@@ -33,7 +34,7 @@ def set_up_connection(user, port):
         return p4
 
     except P4Exception as e:
-        print(f"[ERROR] {e}")
+        logging.error(f"{e}")
         sys.exit(1)
 
 def set_up_workspace(p4, target_stream, client_name, client_root, force_sync):
@@ -52,27 +53,32 @@ def merge_and_submit(p4, source):
     result = p4.run_merge("--from", source, "//...")
     opened = p4.run_opened()
     if len(opened) == 0:
-        print("[INFO] No changes between streams to intergrate.")
+        logging.info("No changes between streams to integrate.")
         sys.exit(0)
     
     p4.run_resolve("-am")
     unresolved = p4.run_resolve("-n")
     if len(unresolved) > 0:
-        print("[ERROR] Conflicts preventing automatic merge detected. Manual resolve required.")
+        logging.error("Conflicts preventing automatic merge detected. Manual resolve required.")
         p4.run_revert("//...")
         sys.exit(1)
     else:
         p4.run_submit("-d", "Automatic merge completed")
-        print(f"[SUCCESS] Successfully merged {len(result)} files from source to target stream.")
+        logging.info(f"Successfully merged {len(result)} files from source to target stream.")
 
 def main(args):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
     p4 = set_up_connection(args.user, args.port)
 
     try:
         set_up_workspace(p4, args.target, args.client_name, args.client_root, args.force_sync)
         merge_and_submit(p4, args.source)
     except P4Exception as e:
-        print(f"[ERROR] {e}")
+        logging.error(f"{e}")
         sys.exit(1)
     
     finally:
