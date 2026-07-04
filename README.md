@@ -32,7 +32,7 @@ Set the following environment variables before running the script to ensure secr
 ## Usage
 Run the script via CLI:
 ```bash
-python merge_script_DevOps_test.py \
+python merge_streams.py \
   --source //depot/main \
   --target //depot/dev \
   --port localhost:1666 \
