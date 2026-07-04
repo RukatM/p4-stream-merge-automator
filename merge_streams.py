@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 import logging
+import requests
 from P4 import P4, P4Exception
 
 def parse_arguments():
@@ -34,8 +35,7 @@ def set_up_connection(user, port):
         return p4
 
     except P4Exception as e:
-        logging.error(f"{e}")
-        sys.exit(1)
+        raise RuntimeError(e)
 
 def set_up_workspace(p4, target_stream, client_name, client_root, force_sync):
     client = p4.fetch_client(client_name)
@@ -53,18 +53,40 @@ def merge_and_submit(p4, source):
     result = p4.run_merge("--from", source, "//...")
     opened = p4.run_opened()
     if len(opened) == 0:
-        logging.info("No changes between streams to integrate.")
-        sys.exit(0)
+        message = "No changes between streams to integrate."
+        logging.info(message)
+        return message
     
     p4.run_resolve("-am")
     unresolved = p4.run_resolve("-n")
     if len(unresolved) > 0:
-        logging.error("Conflicts preventing automatic merge detected. Manual resolve required.")
         p4.run_revert("//...")
-        sys.exit(1)
+        raise RuntimeError("Conflicts preventing automatic merge detected. Manual resolve required.")
     else:
         p4.run_submit("-d", "Automatic merge completed")
-        logging.info(f"Successfully merged {len(result)} files from source to target stream.")
+        message = f"Successfully merged {len(result)} files from source to target stream."
+        logging.info(message)
+        return message
+
+def send_discord_alert(message):
+    webhook_url = os.environ.get("WEBHOOK_URL")
+
+    if not webhook_url:
+        logging.warning("Discord webhook url not set. Skipping Discord notification.")
+        return
+    
+    data = {
+        "content": f"Perforce merge alert: \n{message}"
+    }
+
+    try:
+        response = requests.post(webhook_url, json=data)
+        response.raise_for_status()
+        logging.info("Discord alert sent successfully.")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to send Discord alert: {e}")
+   
+
 
 def main(args):
     logging.basicConfig(
@@ -72,18 +94,26 @@ def main(args):
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
-    p4 = set_up_connection(args.user, args.port)
+
+    status_message = ""
+    exit_code = 0
+    p4 = None
 
     try:
+        p4 = set_up_connection(args.user, args.port)
         set_up_workspace(p4, args.target, args.client_name, args.client_root, args.force_sync)
-        merge_and_submit(p4, args.source)
-    except P4Exception as e:
+        status_message = merge_and_submit(p4, args.source)
+    except Exception as e:
         logging.error(f"{e}")
-        sys.exit(1)
+        status_message = e
+        exit_code = 1
     
     finally:
-        if p4.connected():
+        if p4 and p4.connected():
             p4.disconnect()
+        
+        send_discord_alert(status_message)
+        sys.exit(exit_code)
 
 if __name__ == "__main__":
     args = parse_arguments()
